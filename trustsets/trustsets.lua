@@ -1,6 +1,6 @@
 --[[
     TrustSets - Trust party preset manager for Ashita v4 / Final Fantasy XI
-    Version: 1.4.9 - v1.4.7 layout with Olympus-style gold corner ornaments
+    Version: 1.5.1 - Window-theme visual match to FFXI chat windows
 
     Commands:
       /tsets or /trustsets       Toggle the GUI window
@@ -18,12 +18,13 @@
 
 addon.name    = 'trustsets';
 addon.author  = 'Dugahst';
-addon.version = '1.4.9';
-addon.desc    = 'Trust party presets, verified summon retries, and an Olympus-style framed GUI.';
+addon.version = '1.5.1';
+addon.desc    = 'Trust party presets, verified summon retries, and selectable FFXI window textures.';
 
 require 'common';
 local settings = require 'settings';
 local imgui = require 'imgui';
+local window_themes = require 'window_themes';
 
 -- Allowed interval between sequential Trust casts. Defaults to 6 seconds.
 local DEFAULT_SUMMON_INTERVAL_SECONDS = 6;
@@ -36,6 +37,7 @@ local MIN_CONFIRM_SECONDS = 8;
 -- Example sets; replace with Trusts learned on your character / server.
 local default_settings = T{
     delay_seconds = DEFAULT_SUMMON_INTERVAL_SECONDS,
+    theme = 'olympus', -- Other choices are 1..8 (14.DAT..21.DAT).
     ui_open = T{ false, },
     sets = T{
         leveling = T{ 'Valaineral', 'Kupipi', 'Shantotto II', 'Joachim', 'Koru-Moru' },
@@ -56,6 +58,8 @@ local state = {
         trusts = { { '' }, { '' }, { '' }, { '' }, { '' } },
         confirm_delete = nil,
         message = 'Select a preset or click New.',
+        page = 'parties',
+        settings_page = 'themes',
     },
 };
 
@@ -81,6 +85,14 @@ local function normalize_settings()
         delay = DEFAULT_SUMMON_INTERVAL_SECONDS;
     end
     state.config.delay_seconds = delay;
+    if (state.config.theme ~= 'olympus') then
+        local n = tonumber(state.config.theme);
+        if (not n or n % 1 ~= 0 or n < 1 or n > 8) then
+            state.config.theme = 'olympus';
+        else
+            state.config.theme = n;
+        end
+    end
 end
 normalize_settings();
 
@@ -637,6 +649,8 @@ local function print_help()
     say('  /tset delay [4|5|6|7]           - View/set seconds between summons');
     say('  /tset release                   - Dismiss all Trusts');
     say('  /tset delete NAME               - Delete preset');
+    say('  /tset theme [olympus|1-8]       - View/set window theme');
+    say('  /tsets settings                  - Open Settings > Themes');
 end
 
 -- The settings library saves separately for each FFXI character.
@@ -656,6 +670,7 @@ end);
 ashita.events.register('unload', 'trustsets_unload', function ()
     stop_queue(true);
     save_settings();
+    window_themes.release();
 end);
 
 ashita.events.register('command', 'trustsets_command', function (e)
@@ -674,6 +689,30 @@ ashita.events.register('command', 'trustsets_command', function (e)
         set_ui_visible(true);
     elseif (cmd == 'close') then
         set_ui_visible(false);
+    elseif (cmd == 'settings' or cmd == 'themes') then
+        state.ui.page = 'settings';
+        state.ui.settings_page = 'themes';
+        set_ui_visible(true);
+    elseif (cmd == 'theme') then
+        if (args == '') then
+            say(('Current theme: %s. Use /tset theme olympus or 1-8.'):format(
+                state.config.theme == 'olympus' and 'Olympus XI' or ('Window Type ' .. tostring(state.config.theme))));
+        else
+            local selected = args:lower();
+            if (selected == 'olympus' or selected == 'default') then
+                state.config.theme = 'olympus';
+            else
+                local n = tonumber(selected);
+                if (not n or n % 1 ~= 0 or n < 1 or n > 8) then
+                    say('Valid themes: olympus, 1, 2, 3, 4, 5, 6, 7, 8.');
+                    return;
+                end
+                state.config.theme = n;
+            end
+            save_settings();
+            say(('Theme selected: %s.'):format(state.config.theme == 'olympus'
+                and 'Olympus XI' or ('Window Type ' .. tostring(state.config.theme))));
+        end
     elseif (cmd == 'help') then
         print_help();
     elseif (cmd == 'capture' or cmd == 'current') then
@@ -753,9 +792,60 @@ local ui_muted  = { 0.66, 0.73, 0.83, 1.00 }; -- pale steel blue text
 local ui_link   = { 0.52, 0.79, 1.00, 1.00 }; -- luminous blue highlights
 local ui_warn   = { 0.94, 0.65, 0.46, 1.00 };
 
+-- Each window type uses its authentic DAT texture with a matching, legible
+-- ImGui control palette. ImGui color changes remain local to TrustSets.
+local native_palette = {
+    [1] = { 0.77, 0.67, 0.93, 1.0 }, -- violet
+    [2] = { 0.80, 0.84, 0.94, 1.0 }, -- slate
+    [3] = { 0.54, 0.77, 1.00, 1.0 }, -- blue
+    [4] = { 0.82, 0.84, 0.94, 1.0 }, -- cool gray
+    [5] = { 0.96, 0.86, 0.67, 1.0 }, -- parchment
+    [6] = { 0.70, 0.78, 0.91, 1.0 }, -- dark blue
+    [7] = { 0.92, 0.75, 0.43, 1.0 }, -- earth/gold
+    [8] = { 0.75, 0.81, 0.98, 1.0 }, -- blue-gray
+};
+
 local function push_gui_theme()
+    local id = tonumber(state.config.theme);
+    local native = id and window_themes.available(id);
+    if (native) then
+        ui_accent = native_palette[id];
+        ui_muted = { 0.76, 0.80, 0.87, 1.0 };
+        ui_link = { 0.77, 0.88, 0.99, 1.0 };
+    else
+        ui_accent = { 0.97, 0.84, 0.39, 1.00 };
+        ui_muted = { 0.66, 0.73, 0.83, 1.00 };
+        ui_link = { 0.52, 0.79, 1.00, 1.00 };
+    end
     for _, entry in ipairs(ui_colors) do
-        imgui.PushStyleColor(entry[1], entry[2]);
+        local col, rgba = entry[1], entry[2];
+        if (native) then
+            if (col == ImGuiCol_WindowBg) then
+                -- Near-transparent frame: DAT artwork supplies the backdrop.
+                rgba = {0.01,0.01,0.01,0.01};
+            elseif (col == ImGuiCol_ChildBg) then
+                -- In v1.5.0 this .72-alpha navy panel hid the DAT skin.
+                -- Transparent children reveal the continuous background tile.
+                rgba = {0.0,0.0,0.0,0.02};
+            elseif (col == ImGuiCol_Border or col == ImGuiCol_Separator) then
+                rgba = {native_palette[id][1],native_palette[id][2],native_palette[id][3],0.62};
+            elseif (col == ImGuiCol_TitleBg or col == ImGuiCol_TitleBgActive) then
+                rgba = {0.035,0.043,0.075,1.00};
+            elseif (col == ImGuiCol_FrameBg) then
+                local fields = {
+                    [1]={0.080,0.064,0.145}, [2]={0.090,0.091,0.110},
+                    [3]={0.071,0.061,0.142}, [4]={0.065,0.065,0.068},
+                    [5]={0.090,0.090,0.096}, [6]={0.014,0.058,0.120},
+                    [7]={0.129,0.111,0.070}, [8]={0.032,0.068,0.083},
+                };
+                local r=fields[id]; rgba={r[1],r[2],r[3],0.92};
+            elseif (col == ImGuiCol_Button) then
+                rgba = {0.09,0.11,0.17,0.94};
+            elseif (col == ImGuiCol_Header) then
+                rgba = {native_palette[id][1]*0.26,native_palette[id][2]*0.26,native_palette[id][3]*0.26,0.92};
+            end
+        end
+        imgui.PushStyleColor(col, rgba);
     end
     -- The wiki's panels and controls are crisp, with thin gold outlines.
     -- Stay with ImGuiStyleVars present in the original addon/Ashita v4.
@@ -953,7 +1043,7 @@ local function render_queue_footer()
     imgui.Spacing();
     imgui.TextWrapped(state.ui.message or '');
     imgui.Separator();
-    imgui.TextColored(ui_link, 'GUI  /tsets   or   /trustsets      -      TrustSets v1.4.9 by Dugahst');
+    imgui.TextColored(ui_link, 'GUI  /tsets   or   /trustsets      -      TrustSets v1.5.1 by Dugahst');
 end
 
 -- Gold corner pieces based on the Olympus Hate window-corner reference.
@@ -1020,13 +1110,75 @@ local function draw_window_corners()
     end
 end
 
+-- Functional top-level and settings tabs using buttons instead of optional
+-- ImGui tab-bar APIs, so old Ashita v4 bindings can display them too.
+local function render_settings_page(pane_height)
+    imgui.TextColored(ui_accent, 'SETTINGS');
+    if (imgui.Button('General##trustsets_general', { 128, 28 })) then
+        state.ui.settings_page = 'general';
+    end
+    imgui.SameLine();
+    if (accent_button('Themes##trustsets_themes', { 130, 28 })) then
+        state.ui.settings_page = 'themes';
+    end
+    imgui.Separator();
+    if (state.ui.settings_page == 'general') then
+        imgui.TextColored(ui_accent, 'GENERAL SETTINGS');
+        imgui.TextColored(ui_muted, 'Cast Delay');
+        imgui.TextWrapped('Select 4, 5, 6 or 7 seconds in the queue controls below.');
+        imgui.Spacing();
+        imgui.TextColored(ui_accent, 'SUMMON RETRIES');
+        imgui.TextWrapped('Each Trust is verified against the party roster; failed summons are retried up to 3 total attempts.');
+        imgui.TextWrapped('Your party sets and theme selection save automatically for this character.');
+        return;
+    end
+    imgui.TextColored(ui_muted, 'Theme selection saves automatically and applies to this window.');
+    imgui.Spacing();
+    local preview_width = 240;
+    imgui.BeginChild('##trustsets_theme_library', { 290, math.max(270,pane_height-100) }, ImGuiChildFlags_Borders);
+    imgui.TextColored(ui_accent, 'WINDOW THEMES');
+    if (imgui.Selectable('Olympus XI (Default)##ts_olympus', state.config.theme == 'olympus')) then
+        state.config.theme = 'olympus';
+        save_settings();
+    end
+    imgui.Separator();
+    for i=1,8 do
+        local title = ('Window Type %d    (%d.DAT)##ts_theme%d'):format(i,i+13,i);
+        if (imgui.Selectable(title, tonumber(state.config.theme)==i)) then
+            state.config.theme = i;
+            save_settings();
+        end
+    end
+    imgui.EndChild();
+    imgui.SameLine();
+    imgui.BeginChild('##trustsets_theme_preview', { 0, math.max(270,pane_height-100) }, ImGuiChildFlags_Borders);
+    imgui.TextColored(ui_accent, 'PREVIEW');
+    if (state.config.theme == 'olympus') then
+        imgui.TextWrapped('Olympus XI');
+        imgui.TextWrapped('Midnight navy, gold frame, gold corner ornaments, and icy-blue text.');
+    else
+        local n = tonumber(state.config.theme);
+        imgui.TextColored(ui_muted, ('Window Type %d  /  ROM\\0\\%d.DAT'):format(n,n+13));
+        imgui.Spacing();
+        if (not window_themes.preview(imgui, n, preview_width, 140)) then
+            imgui.TextColored(ui_warn, 'Native texture unavailable.');
+            imgui.TextWrapped('The addon will use an opaque palette fallback. Ensure all theme PNGs are installed.');
+        end
+        imgui.Spacing();
+        imgui.TextWrapped('DAT background calibrated to FFXI chat-window colors; original 128x128 tiles, borders and corners.');
+    end
+    imgui.EndChild();
+end
+
 local function render_gui()
     if (not state.ui.visible[1]) then return; end
 
     imgui.SetNextWindowSize({ 700, 730 }, ImGuiCond_FirstUseEver);
     push_gui_theme();
     if (imgui.Begin('TrustSets  |  Trust Party Manager##trustsets_main', state.ui.visible)) then
-        draw_window_corners();
+        local id = tonumber(state.config.theme);
+        local themed = id and window_themes.decorate(imgui,id);
+        if (not themed) then draw_window_corners(); end
         local pushed_font = push_compact_font();
         if (not pushed_font) then scale_legacy_window_font(); end
         imgui.TextColored(ui_accent, 'TRUSTSETS');
@@ -1034,21 +1186,34 @@ local function render_gui()
         imgui.TextColored(ui_link, '  /  TRUST PARTY MANAGER');
         imgui.TextColored(ui_muted, 'Save groups, capture your active party, and summon with one click.');
         imgui.Separator();
+        if (state.ui.page == 'parties') then
+            if (accent_button('Trust Parties##trustsets_parties_tab', { 145, 29 })) then state.ui.page='parties'; end
+            imgui.SameLine();
+            if (imgui.Button('Settings##trustsets_settings_tab', { 130, 29 })) then state.ui.page='settings'; end
+        else
+            if (imgui.Button('Trust Parties##trustsets_parties_tab', { 145, 29 })) then state.ui.page='parties'; end
+            imgui.SameLine();
+            if (accent_button('Settings##trustsets_settings_tab', { 130, 29 })) then state.ui.page='settings'; end
+        end
         imgui.Spacing();
-
-        -- Give both panes more room as the main window is made taller.
-        -- ImGui's default behavior shows scrollbars ONLY if content overflows;
-        -- do not set AlwaysVerticalScrollbar or NoScrollbar on these panes.
-        local pane_height = math.max(360, math.floor(imgui.GetWindowHeight() - 240));
-        imgui.BeginChild('##trustsets_sidebar', { 240, pane_height }, ImGuiChildFlags_Borders);
-        if (not pushed_font) then scale_legacy_window_font(); end
-        render_preset_sidebar(pane_height);
-        imgui.EndChild();
-        imgui.SameLine();
-        imgui.BeginChild('##trustsets_editor', { 0, pane_height }, ImGuiChildFlags_Borders);
-        if (not pushed_font) then scale_legacy_window_font(); end
-        render_editor();
-        imgui.EndChild();
+        local pane_height = math.max(330, math.floor(imgui.GetWindowHeight() - 282));
+        if (state.ui.page == 'parties') then
+            -- Default scrollbars only appear when the content exceeds height.
+            imgui.BeginChild('##trustsets_sidebar', { 240, pane_height }, ImGuiChildFlags_Borders);
+            if (not pushed_font) then scale_legacy_window_font(); end
+            render_preset_sidebar(pane_height);
+            imgui.EndChild();
+            imgui.SameLine();
+            imgui.BeginChild('##trustsets_editor', { 0, pane_height }, ImGuiChildFlags_Borders);
+            if (not pushed_font) then scale_legacy_window_font(); end
+            render_editor();
+            imgui.EndChild();
+        else
+            imgui.BeginChild('##trustsets_settings', { 0, pane_height }, ImGuiChildFlags_Borders);
+            if (not pushed_font) then scale_legacy_window_font(); end
+            render_settings_page(pane_height);
+            imgui.EndChild();
+        end
         render_queue_footer();
         if (pushed_font) then imgui.PopFont(); end
     end
